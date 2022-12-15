@@ -174,45 +174,45 @@ class OntologyManager:
             logger.info(f"warning: could not find {word2ner_file}")
 
     def load_ontology_file(self, ontology_file="ontology.json.gz", tmp_dir=None, data_dir=None):
-        """ Load the prefix based json file representing the base ontology (lexicon) """
-        if data_dir is None: data_dir = OntologyManager.data_dir
-        if tmp_dir is None: tmp_dir = OntologyManager.tmp_dir
-        if ontology_file is not None:
-            if not OntologyManager.ontology:
-              if not os.path.exists(ontology_file):
-                  ontology_file = f"{data_dir}/{ontology_file}"
+      """ Load the prefix based json file representing the base ontology (lexicon) """
+      if data_dir is None: data_dir = OntologyManager.data_dir
+      if tmp_dir is None: tmp_dir = OntologyManager.tmp_dir
+      if ontology_file is None:
+        if not OntologyManager.ontology:
+          OntologyManager.ontology = OrderedDict()
+      elif not OntologyManager.ontology:
+        if not os.path.exists(ontology_file):
+            ontology_file = f"{data_dir}/{ontology_file}"
               #if not os.path.exists(ontology_file):
               #    OntologyManager.ontology = {}
-              if not os.path.exists(ontology_file):
-                  logger.info(f"{ontology_file} does not exist")
-              else:
-                if ontology_file.endswith(".gz"):
-                    with gzip.open(ontology_file, 'r') as fin:
-                        OntologyManager.ontology = json.loads(fin.read().decode('utf-8'))
-                else:
-                    OntologyManager.ontology = json.load(open(ontology_file, "rb"))
-              if not OntologyManager.ontology: 
-                OntologyManager.ontology = OrderedDict()              
-              if len(OntologyManager.ontology) > 20: 
+        if os.path.exists(ontology_file):
+          if ontology_file.endswith(".gz"):
+              with gzip.open(ontology_file, 'r') as fin:
+                  OntologyManager.ontology = json.loads(fin.read().decode('utf-8'))
+          else:
+              OntologyManager.ontology = json.load(open(ontology_file, "rb"))
+        else:
+          logger.info(f"{ontology_file} does not exist")
+        if not OntologyManager.ontology: 
+          OntologyManager.ontology = OrderedDict()
+        if len(OntologyManager.ontology) > 20: 
                 #for backwards compatability
                 #this is probably a dictionary of ontologies and not a lexicon itself
-                OntologyManager.ontology = OrderedDict({OntologyManager.base_onto_name+"0":OntologyManager.ontology })
-              #print (len(OntologyManager.ontology))
-              for ontology in OntologyManager.ontology.values():
-                 for lexicons in ontology.values():
-                   #print (lexicon)
-                   for lex in lexicons[2:]:
-                     for val in lex.values():
-                        label = val[0][0]
-                        if label in OntologyManager.upper_ontology:
-                            val[0] = OntologyManager.upper_ontology[label][0] # shrink the memory down by reusing the same string
-                        if len(val) > 1:
-                          OntologyManager._max_lexicon = max(OntologyManager._max_lexicon, max(val[1]))
-                        else:
-                          OntologyManager._max_lexicon += 1
-        else:
-              if not OntologyManager.ontology: 
-                OntologyManager.ontology = OrderedDict()
+          OntologyManager.ontology = OrderedDict(
+              {f"{OntologyManager.base_onto_name}0": OntologyManager.ontology})
+        #print (len(OntologyManager.ontology))
+        for ontology in OntologyManager.ontology.values():
+           for lexicons in ontology.values():
+             #print (lexicon)
+             for lex in lexicons[2:]:
+               for val in lex.values():
+                  label = val[0][0]
+                  if label in OntologyManager.upper_ontology:
+                      val[0] = OntologyManager.upper_ontology[label][0] # shrink the memory down by reusing the same string
+                  if len(val) > 1:
+                    OntologyManager._max_lexicon = max(OntologyManager._max_lexicon, max(val[1]))
+                  else:
+                    OntologyManager._max_lexicon += 1
 
 
     def save_ontology_file(self, ontology_file="ontology.json.gz"):
@@ -229,18 +229,18 @@ class OntologyManager:
         os.system(f"rm {ontology_file}")
 
     def load_target_lang_data(self, target_lang_data_file=None, target_lang=None):
-        """ loads a langauage specific json file.  """
+      """ loads a langauage specific json file.  """
 
-        data_dir = self.data_dir
-        tmp_dir = self.tmp_dir
-        if target_lang_data_file is None:
-            if os.path.exists(os.path.join(data_dir, f'{target_lang}.json')):
-                target_lang_data_file = os.path.join(data_dir, f'{target_lang}.json')
-        if target_lang_data_file is None: return
-        if os.path.exists(target_lang_data_file):
-            self.target_lang_data = json.load(open(target_lang_data_file, "rb"))
-        else:
-            self.target_lang_data = {}
+      data_dir = self.data_dir
+      tmp_dir = self.tmp_dir
+      if target_lang_data_file is None and os.path.exists(
+          os.path.join(data_dir, f'{target_lang}.json')):
+        target_lang_data_file = os.path.join(data_dir, f'{target_lang}.json')
+      if target_lang_data_file is None: return
+      if os.path.exists(target_lang_data_file):
+          self.target_lang_data = json.load(open(target_lang_data_file, "rb"))
+      else:
+          self.target_lang_data = {}
 
     def save_target_lang_data(self, target_lang_data_file):
         if target_lang_data_file is None: return
@@ -250,81 +250,76 @@ class OntologyManager:
         # os.system(f"gzip -f {data_dir}/{target_lang_data_file}")
 
     def _has_nonstopword(self, wordArr):
-        for word in wordArr:
-            if word.strip(self.strip_chars) not in self.stopwords:
-                return True
-        return False
+      return any(
+          word.strip(self.strip_chars) not in self.stopwords for word in wordArr)
 
     def _get_all_word_shingles(self, wordArr, word_shingle_cutoff=None, more_shingles=True):
-        """  create patterned variations (prefix and suffix based shingles). will lower case everything. """
-        lenWordArr = len(wordArr)
-        wordArr = [w.lower() for w in wordArr]
-        if word_shingle_cutoff is None: word_shingle_cutoff = self.word_shingle_cutoff
-        compound_word_step = self.compound_word_step
-        wordArr1 = wordArr2 = wordArr3 = wordArr4 = None
-        ret = OrderedDict()
-        if lenWordArr > compound_word_step:
-            #TODO: we can add some randomness in how we create patterns
-            wordArr1 = wordArr[:compound_word_step - 1] + [wordArr[-1]]
-            wordArr2 = [wordArr[0]] + wordArr[1 - compound_word_step:]
-            wordArr1 = [w if len(w) <= word_shingle_cutoff else w[:word_shingle_cutoff] for w in wordArr1]
-            wordArr2 = [w if len(w) <= word_shingle_cutoff else w[:word_shingle_cutoff] for w in wordArr2]
-            ret[tuple(wordArr1)] = 1 
-            ret[tuple(wordArr2)] = 1
-            if more_shingles:
-                wordArr3 = copy.copy(wordArr1)
-                wordArr3[-1] = wordArr3[-1] if len(wordArr3[-1]) <= word_shingle_cutoff else '*' + wordArr3[-1][len(
-                    wordArr3[-1]) - word_shingle_cutoff + 1:]
-                wordArr4 = copy.copy(wordArr2)
-                wordArr4[-1] = wordArr4[-1] if len(wordArr4[-1]) <= word_shingle_cutoff else '*' + wordArr4[-1][len(
-                    wordArr4[-1]) - word_shingle_cutoff + 1:]
-                wordArr3 = [w if len(w) <= word_shingle_cutoff else w[:word_shingle_cutoff] for w in wordArr3]
-                wordArr4 = [w if len(w) <= word_shingle_cutoff else w[:word_shingle_cutoff] for w in wordArr4]
-                ret[tuple(wordArr3)] = 1 
-                ret[tuple(wordArr4)] = 1
-        else:  # lenWordArr <= compound_word_step
-            wordArr1 = [w if len(w) <= word_shingle_cutoff else w[:word_shingle_cutoff] for w in wordArr]
-            ret[tuple(wordArr1)] = 1
-            if lenWordArr > 1 and more_shingles:
-                wordArr2 = copy.copy(wordArr)
-                wordArr2[-1] = wordArr2[-1] if len(wordArr2[-1]) <= word_shingle_cutoff else '*' +  wordArr2[-1][len(
-                    wordArr2[-1]) - word_shingle_cutoff + 1:]
-                wordArr2 = [w if len(w) <= word_shingle_cutoff else w[:word_shingle_cutoff] for w in wordArr2]
-                ret[tuple(wordArr2)]= 1
-        return [list(a) for a in ret.keys()]
+      """  create patterned variations (prefix and suffix based shingles). will lower case everything. """
+      lenWordArr = len(wordArr)
+      wordArr = [w.lower() for w in wordArr]
+      if word_shingle_cutoff is None: word_shingle_cutoff = self.word_shingle_cutoff
+      compound_word_step = self.compound_word_step
+      wordArr1 = wordArr2 = wordArr3 = wordArr4 = None
+      ret = OrderedDict()
+      if lenWordArr > compound_word_step:
+        #TODO: we can add some randomness in how we create patterns
+        wordArr1 = wordArr[:compound_word_step - 1] + [wordArr[-1]]
+        wordArr2 = [wordArr[0]] + wordArr[1 - compound_word_step:]
+        wordArr1 = [w if len(w) <= word_shingle_cutoff else w[:word_shingle_cutoff] for w in wordArr1]
+        wordArr2 = [w if len(w) <= word_shingle_cutoff else w[:word_shingle_cutoff] for w in wordArr2]
+        ret[tuple(wordArr1)] = 1
+        ret[tuple(wordArr2)] = 1
+        if more_shingles:
+          wordArr3 = copy.copy(wordArr1)
+          wordArr3[-1] = (
+              wordArr3[-1] if len(wordArr3[-1]) <= word_shingle_cutoff else
+              f'*{wordArr3[-1][len(wordArr3[-1]) - word_shingle_cutoff + 1:]}')
+          wordArr4 = copy.copy(wordArr2)
+          wordArr4[-1] = (
+              wordArr4[-1] if len(wordArr4[-1]) <= word_shingle_cutoff else
+              f'*{wordArr4[-1][len(wordArr4[-1]) - word_shingle_cutoff + 1:]}')
+          wordArr3 = [w if len(w) <= word_shingle_cutoff else w[:word_shingle_cutoff] for w in wordArr3]
+          wordArr4 = [w if len(w) <= word_shingle_cutoff else w[:word_shingle_cutoff] for w in wordArr4]
+          ret[tuple(wordArr3)] = 1
+          ret[tuple(wordArr4)] = 1
+      else:# lenWordArr <= compound_word_step
+        wordArr1 = [w if len(w) <= word_shingle_cutoff else w[:word_shingle_cutoff] for w in wordArr]
+        ret[tuple(wordArr1)] = 1
+        if lenWordArr > 1 and more_shingles:
+          wordArr2 = copy.copy(wordArr)
+          wordArr2[-1] = (
+              wordArr2[-1] if len(wordArr2[-1]) <= word_shingle_cutoff else
+              f'*{wordArr2[-1][len(wordArr2[-1]) - word_shingle_cutoff + 1:]}')
+          wordArr2 = [w if len(w) <= word_shingle_cutoff else w[:word_shingle_cutoff] for w in wordArr2]
+          ret[tuple(wordArr2)]= 1
+      return [list(a) for a in ret.keys()]
 
     def get_word2ner_stats(self, word2ner, weight_factors=None):
-        if weight_factors is None:
-          weight_factors = default_onto_tags.label_weight_factors
-        connector = self.connector
-        label_cnt = {}
-        for word_ner in word2ner:
-            word = word_ner[0]
-            label = word_ner[1]
-            if len(word_ner) > 2:
-              weight = word_ner[2]
-            else: 
-              weight = 1.0
-            if len(word_ner) > 3:
-              _idx = word_ner[3]
-            else: 
-              _idx = -1
-            label = label.upper()
-            word, wordArr = self.canonical_word(word)
-            orig_lens = len(word) + len(wordArr)
-            while wordArr:
-                if wordArr[0] in self.stopwords:
-                    wordArr = wordArr[1:]
-                else:
-                    break
-            if not wordArr:
-                continue
-            # we don't have an actual count of the word in the corpus, so we create a weight based
-            # on the length, assuming shorter words with less compound parts are more frequent
-            weight = weight + 1 / (1.0 + math.sqrt(orig_lens))
-            weight *= weight_factors.get(label, 1.0)
-            label_cnt[label] = label_cnt.get(label, 0) + weight
-        return Counter(label_cnt).most_common()
+      if weight_factors is None:
+        weight_factors = default_onto_tags.label_weight_factors
+      connector = self.connector
+      label_cnt = {}
+      for word_ner in word2ner:
+        word = word_ner[0]
+        label = word_ner[1]
+        weight = word_ner[2] if len(word_ner) > 2 else 1.0
+        _idx = word_ner[3] if len(word_ner) > 3 else -1
+        label = label.upper()
+        word, wordArr = self.canonical_word(word)
+        orig_lens = len(word) + len(wordArr)
+        while wordArr:
+            if wordArr[0] in self.stopwords:
+                wordArr = wordArr[1:]
+            else:
+                break
+        if not wordArr:
+            continue
+        # we don't have an actual count of the word in the corpus, so we create a weight based
+        # on the length, assuming shorter words with less compound parts are more frequent
+        weight = weight + 1 / (1.0 + math.sqrt(orig_lens))
+        weight *= weight_factors.get(label, 1.0)
+        label_cnt[label] = label_cnt.get(label, 0) + weight
+      return Counter(label_cnt).most_common()
 
     @staticmethod
     def onto_level_2_word_shingle_cutoff(level):
@@ -334,17 +329,14 @@ class OntologyManager:
       """ Does not do trannum or lower case automatically. """
       if connector is None:
         connector = self.connector
-      if self.is_cjk < 0:
-        is_cjk = self.cjk_detect(word)
-      else:
-        is_cjk = self.is_cjk   
+      is_cjk = self.cjk_detect(word) if self.is_cjk < 0 else self.is_cjk
       if not supress_cjk_tokenize and is_cjk:
         word = self.cjk_tokenize_word(word, connector)
 
       orig_word = word = word.replace(" ", connector).replace(connector+connector, connector).strip(self.strip_chars + connector).replace('__', connector)
       if do_lower: word = word.lower()
       if do_trannum: word = word.translate(trannum)
-      wordArr = word.split(connector)      
+      wordArr = word.split(connector)
       # some proper nouns start with stop words like determiners. let's strip those.
       while wordArr:
         if wordArr[0] in self.stopwords:
@@ -354,9 +346,7 @@ class OntologyManager:
         if not wordArr:
           continue
       word = connector.join(wordArr).replace('__', connector).replace(connector+connector, connector)
-      if not word:
-        return orig_word, orig_word.split(connector)
-      return word, wordArr
+      return (word, wordArr) if word else (orig_word, orig_word.split(connector))
 
     def add_to_ontology(self, word2ner, word_shingle_cutoff=None, onto_name=None, keep_idx=False, add_to_full_word2ner=False, full_word2ner=None, depth=4, max_depth=4, weight_factors={'PERSON': 5, }):
         """

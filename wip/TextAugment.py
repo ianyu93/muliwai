@@ -88,8 +88,8 @@ class TextAugment:
         self.qg = qg
         self.banned_words = banned_words
         self.hf_ner_model_map = hf_ner_model_map
-        self.translation_pipelines = translation_pipelines if translation_pipelines else {}
-        self.ner_model_name2pipelines = ner_model_name2pipelines if ner_model_name2pipelines else {}
+        self.translation_pipelines = translation_pipelines or {}
+        self.ner_model_name2pipelines = ner_model_name2pipelines or {}
         self.strip_chars = CharManager.strip_chars
         self.punc_char = CharManager.punc_char
         self.special_char = CharManager.special_char
@@ -107,8 +107,8 @@ class TextAugment:
         self.m2m_tokenizer = M2M100Tokenizer.from_pretrained("facebook/m2m100_418M")
 
         # TODO: OntologyManager init has changed
-        if production_mode:  # use the below for production usage. the above is for testing.
-            if not self.ontology_manager: self.ontology_manager = OntologyManager()  # src_lang=src_lang
+        if production_mode and not self.ontology_manager:
+            self.ontology_manager = OntologyManager()  # src_lang=src_lang
         logging.info("Finished Loading TextAugment")
 
     def check_good_sentence(self, s, src_lang, stopwords, stopword_ratio_cutoff=0.06, bannedwords=None, badwords=None,
@@ -139,13 +139,13 @@ class TextAugment:
                     sArr) < stopword_ratio_cutoff:
                 return False
             if src_lang in ("ja", "ko", "zh"):
-                if src_lang == "zh":
-                    max_stoword = self.max_stoword_len_zh
-                elif src_lang == "ko":
-                    max_stoword = self.max_stoword_len_ko
-                elif src_lang == "ja":
+                if src_lang == "ja":
                     max_stoword = self.max_stoword_len_ja
 
+                elif src_lang == "ko":
+                    max_stoword = self.max_stoword_len_ko
+                elif src_lang == "zh":
+                    max_stoword = self.max_stoword_len_zh
                 len_s = len(s)
                 stop_cnt = 0
                 total_cnt = 0
@@ -159,10 +159,16 @@ class TextAugment:
                     return False
         if badwords is not None:
             # print ('bw', len([s2 for s2 in sArr if s2 in badwords])/len(sArr))
-            if src_lang not in ("ja", "ko", "zh") and len([s2 for s2 in sArr if s2 in badwords]) / len(
-                    sArr) > badword_ratio_cutoff:
-                if any(s2 for s2 in sArr if s2 in bannedwords) or any(s2 for s2 in sArr if s2 in default_bannedwords):
-                    return False
+            if (
+                src_lang not in ("ja", "ko", "zh")
+                and len([s2 for s2 in sArr if s2 in badwords]) / len(sArr)
+                > badword_ratio_cutoff
+                and (
+                    any(s2 for s2 in sArr if s2 in bannedwords)
+                    or any(s2 for s2 in sArr if s2 in default_bannedwords)
+                )
+            ):
+                return False
             if src_lang in ("ja", "ko", "zh"):
                 badword_ratio_cutoff /= 100
                 len_s = len(s)
@@ -216,47 +222,47 @@ class TextAugment:
                 label = ""
                 # TODO, use spacy_en to get NER and only fall back to "who", "when", "where" to determine ner if we find nothing
                 if quest[0] == "who" and aHash1['answer'][-1] == 's':
-                    label = "organization_" + str(i)
+                    label = f"organization_{i}"
                     if "'s" in quest:
                         for j in range(len(quest)):
                             if j > 0 and quest[j - 1] == "'s":
-                                label = quest[j] + "_" + str(i)
+                                label = f"{quest[j]}_{i}"
                                 break
                     for a in aHash1['answer'].lower().split():
                         if a not in stopwords_hash:
                             answers[a] = label
                 elif quest[0] == "who":
-                    label = "person_" + str(i)
+                    label = f"person_{i}"
                     if "'s" in quest:
                         for j in range(len(quest)):
                             if j > 0 and quest[j - 1] == "'s":
-                                label = quest[j] + "_" + str(i)
+                                label = f"{quest[j]}_{i}"
                                 break
                     for a in aHash1['answer'].lower().split():
                         if a not in stopwords_hash:
                             answers[a] = label
                 elif quest[0] == "where":
-                    label = "location_" + str(i)
+                    label = f"location_{i}"
                 elif quest[0] == "when":
-                    label = "date_or_time_" + str(i)
+                    label = f"date_or_time_{i}"
                 elif quest[0] == "why":
-                    label = "reason_" + str(i)
+                    label = f"reason_{i}"
                 elif quest[0] == "how" and quest[1] in ("much", "many"):
-                    label = "quantity_" + str(i)
+                    label = f"quantity_{i}"
                 elif quest[0] == "how":
-                    label = "method_" + str(i)
+                    label = f"method_{i}"
                 elif quest[0] in ("which", "what") and quest[1] not in stopwords_hash:
-                    label = quest[1] + "_" + str(i)
+                    label = f"{quest[1]}_{i}"
                 elif "'s" in quest:
                     for j in range(len(quest)):
                         if j > 0 and quest[j - 1] == "'s":
-                            label = quest[j] + "_" + str(i)
+                            label = f"{quest[j]}_{i}"
                             break
                 if label:
                     answers[aHash1['answer'].lower()] = label
 
-                # for b in a['answer'].lower().split():
-                #  answers[b] = label
+                        # for b in a['answer'].lower().split():
+                        #  answers[b] = label
             print(answers)
 
         for aHash in allqa:
@@ -270,20 +276,23 @@ class TextAugment:
                 answer_keys = list(answers.keys())
                 answer_keys.sort(key=lambda k: len(k), reverse=True)
                 for a in answer_keys:
-                    if " " + a + " " in quest:
-                        quest = quest.replace(" " + a + " ", " " + answers[a] + " ")
-                    elif " " + a + ", " in quest:
-                        quest = quest.replace(" " + a + ", ", " " + answers[a] + ", ")
+                    if f" {a} " in quest:
+                        quest = quest.replace(f" {a} ", f" {answers[a]} ")
+                    elif f" {a}, " in quest:
+                        quest = quest.replace(f" {a}, ", f" {answers[a]}, ")
                 quest = quest.split()
                 # print (quest)
                 qtype = []
-                if answers.get(aHash1['answer'].lower()):
-                    if answers.get(aHash1['answer'].lower()).split("_")[0] == "person":
-                        qtype = ["is", "who"]
+                if (
+                    answers.get(aHash1['answer'].lower())
+                    and answers.get(aHash1['answer'].lower()).split("_")[0]
+                    == "person"
+                ):
+                    qtype = ["is", "who"]
                 if not qtype and quest[0] in ("when", "where", "why", "how"):  # , "which"
                     qtype = [quest[0]]
                     if quest[0] == "how" and quest[1] in ("much", "many"):
-                        qtype = qtype + [quest[1]]
+                        qtype += [quest[1]]
 
                 # label=[q for q in quest if (q not in ("much", "many",) and not stopwords_hash.get(q) and q not in answers)]#+qtype
                 label = [q for q in quest if (q[0] not in "0123456789") and (q not in ("the", "a", "an"))]

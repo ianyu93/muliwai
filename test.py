@@ -54,11 +54,11 @@ def multiprocess_ner(docs,
 
 if __name__ == "__main__":
     def load_py_from_str(s, default=None):
-        if not s.strip(): return default
-        ret = {'__ret': None}
+      if not s.strip(): return default
+      ret = {'__ret': None}
         # print (s)
-        exec("__ret= " + s, ret)
-        return ret['__ret']
+      exec(f"__ret= {s}", ret)
+      return ret['__ret']
 
 
     def load_all_pii(infile="./zh_pii.jsonl"):

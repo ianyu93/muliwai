@@ -7,6 +7,4 @@ def cjk_detect(texts):
     if re.search("[\u3040-\u30ff]", texts):
         return "ja"
     # chinese
-    if re.search("[\u4e00-\u9FFF]", texts):
-        return "zh"
-    return None
+    return "zh" if re.search("[\u4e00-\u9FFF]", texts) else None

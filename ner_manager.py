@@ -96,88 +96,78 @@ def load_hf_ner_pipelines(target_lang, device="cpu", device_id=-1):
     return pipelines
 
 def chunkify(doc, src_lang,  num_words_per_chunk=150,  text_key=None, offset_key=None):
-      """
+  """
       Do basic sentence splitting and limiting each chunk's number of words to prevent overflow. We assume the docs are long. 
       """
-      global _id
-      if text_key is None:
-        if f'{src_lang}_text' in doc:
-          text_key = f'{src_lang}_text'
-        else:
-          text_key = 'text'
-      if text_key is None:
-        if f'{src_lang}_offset' in doc:
-          offset_key = f'{src_lang}_offset'
-        else:
-          offset_key = 'offset'
-      src_is_cjk = src_lang in ("zh", "ja", "ko", "th")
-      if src_is_cjk: 
-        sep = ""
-      else:
-        sep = " "
-      if type(doc) is str:
-        doc = {'text': doc}
-      chunks = doc['chunks'] = doc.get('chunks', [])
-      if 'id' not in doc or int(doc['id']) < 0:
-            doc['id'] = str(_id)
-            _id += 1
-      if text_key in doc: 
-        #simple multi-lingual tokenizer and sentence splitter
-        offset = 0
-        if src_is_cjk:
-          text = list(doc[text_key].replace("。", "。 ").replace("  ", " "))
-        else:
-          textarr = doc[text_key].replace("  ", " ").split()
-          text = []
-          for t in textarr:
-            len_t = len(t)
-            if len_t == 1:
-              text.append(t)
-              continue
-            punc_found = [punc for punc in t if punc in punc_char]
-            word1, word2 = "", ""
-            if punc_found:
-              tarr = t.split(punc_found[0])
-              word1 = tarr[-2]
-              word2 = tarr[-1]
-            if punc_found and t[-1] not in punc_char and \
+  global _id
+  if text_key is None:
+    text_key = f'{src_lang}_text' if f'{src_lang}_text' in doc else 'text'
+  if text_key is None:
+    offset_key = f'{src_lang}_offset' if f'{src_lang}_offset' in doc else 'offset'
+  src_is_cjk = src_lang in ("zh", "ja", "ko", "th")
+  sep = "" if src_is_cjk else " "
+  if type(doc) is str:
+    doc = {'text': doc}
+  chunks = doc['chunks'] = doc.get('chunks', [])
+  if 'id' not in doc or int(doc['id']) < 0:
+        doc['id'] = str(_id)
+        _id += 1
+  if text_key in doc: 
+    #simple multi-lingual tokenizer and sentence splitter
+    offset = 0
+    if src_is_cjk:
+      text = list(doc[text_key].replace("。", "。 ").replace("  ", " "))
+    else:
+      textarr = doc[text_key].replace("  ", " ").split()
+      text = []
+      for t in textarr:
+        len_t = len(t)
+        if len_t == 1:
+          text.append(t)
+          continue
+        punc_found = [punc for punc in t if punc in punc_char]
+        word1, word2 = "", ""
+        if punc_found:
+          tarr = t.split(punc_found[0])
+          word1 = tarr[-2]
+          word2 = tarr[-1]
+        if punc_found and t[-1] not in punc_char and \
                               ((punc_found[0] not in ".。") or \
                                (t[0] not in "0123456789" and t[0] == t[0].lower()) or \
                                (word1 and word1[-1] in strip_chars) or \
                                (word2 and word2[0] in strip_chars)):
-              w = t[t.index(punc_found[0])+1]
-              if w == w.upper():
-                t, t1 = t.split(punc_found[0],1)
-                t = t+punc_found[0]
-                text.append(t)
-                text.append(t1)
-                continue
-            text.append(t)
-        text[0] = text[0].lstrip()
-        text[-1] = text[-1].rstrip()
-        doc[text_key] = sep.join(text)
-        len_text = len(text)
-        src_text = ""
-        while len_text > num_words_per_chunk:
-            for j in range(num_words_per_chunk-1, len_text):
-              if j > num_words_per_chunk * 2: break
-              if (src_is_cjk and text[j] in punc_char+' ') or \
-                  (not src_is_cjk and text[j][-1] in punc_char):
-                break
-            text_str = sep.join(text[:j+1])
-            chunks.append({text_key: text_str, 'id': doc['id'], 'offset': offset})
-            doc['chunks'].append(chunks[-1])
-            offset += len(text_str) + (0 if src_is_cjk else 1)
-            text = text[j+1:]
-            len_text = len(text)
-        if text:
-            text_str = sep.join(text)
-            chunks.append({text_key: text_str, 'id': doc['id'], 'offset': offset})
-            doc['chunks'].append(chunks[-1])
-      return chunks
+          w = t[t.index(punc_found[0])+1]
+          if w == w.upper():
+            t, t1 = t.split(punc_found[0],1)
+            t = t+punc_found[0]
+            text.extend((t, t1))
+            continue
+        text.append(t)
+    text[0] = text[0].lstrip()
+    text[-1] = text[-1].rstrip()
+    doc[text_key] = sep.join(text)
+    len_text = len(text)
+    src_text = ""
+    while len_text > num_words_per_chunk:
+      for j in range(num_words_per_chunk-1, len_text):
+        if j > num_words_per_chunk * 2: break
+        if (src_is_cjk and text[j] in f'{punc_char} '
+            or (not src_is_cjk and text[j][-1] in punc_char)):
+          break
+      text_str = sep.join(text[:j+1])
+      chunks.append({text_key: text_str, 'id': doc['id'], 'offset': offset})
+      doc['chunks'].append(chunks[-1])
+      offset += len(text_str) + (0 if src_is_cjk else 1)
+      text = text[j+1:]
+      len_text = len(text)
+    if text:
+        text_str = sep.join(text)
+        chunks.append({text_key: text_str, 'id': doc['id'], 'offset': offset})
+        doc['chunks'].append(chunks[-1])
+  return chunks
 
 def detect_ner_with_hf_model(sentence, src_lang,  tag_type={'PERSON', 'PUBLIC_FIGURE'},  chunks=None, hf_pipelines=None, num_words_per_chunk=150,  device="cpu", device_id=-1, weight=1.0, text_key=None, ner_key=None, offset_key=None, batch_size=20,):
-    """
+  """
     Output:
        - This function returns a list of 4 tuples, representing an NER detection for [(entity, start, end, tag), ...]
     Input:
@@ -190,169 +180,163 @@ def detect_ner_with_hf_model(sentence, src_lang,  tag_type={'PERSON', 'PUBLIC_FI
       NOTE: we don't use results_arr = hf_pipeline([chunk[text_key] for chunk in chunks], grouped_entities=True)
       because grouped_entities does not properly group all entities as we do it below.
     """
-    if device_id < 0 and device != "cpu" and ":" in device:
-      device_id = int(device.split(":")[-1])
-    sw = set(stopwords.get(src_lang, []))
-    if offset_key is None:
-      offset_key = 'offset'
-    if ner_key is None:
-      ner_key = 'ner'
-    if text_key is None:
-      text_key = 'text'
-    doc = {'text': sentence}
-    src_is_cjk = src_lang in ("zh", "ja", "ko", "th")
-    if src_is_cjk: 
-        sep = ""
-    else:
-        sep = " "
-    if chunks is None:
-      chunks = chunkify(doc, src_lang, num_words_per_chunk)
-    if hf_pipelines is None:
-      hf_pipelines = load_hf_ner_pipelines(src_lang, device=device, device_id=device_id)
-    for hf_pipeline in hf_pipelines: 
-      results_arr = hf_pipeline['pipeline']([chunk[text_key] for chunk in chunks], batch_size=min(batch_size, len(chunks)))
-      results_arr2 = []
-      offset = 0
-      for chunk, results in zip(chunks, results_arr):
-        text = chunk[text_key]
-        _id = chunk['id']
-        ner = doc[ner_key] = doc.get(ner_key,{})
-        offset = chunk[offset_key]
-        len_text= len(text)
-        results = [ner_result for ner_result in results if ner_result['word'] not in ("[UNK]", "<unk>")]
-        if not results:
-          results_arr2.append([])
-          continue
-        results2 = []
-        if results[0]['start'] is not None: #TODO, test for the case where all the 'start' are '0'.
-          results.sort(key=lambda a: a['start'])
-        else:
-          results.sort(key=lambda a: a['index'])
-          i = 0
-          for ner_result in results:
-            ner_result['word'] = word = ner_result['word'].rstrip('@@')
-            ner_result['start'] = text.index(word, i)
-            i = ner_result['start'] + 1
-            ner_result['end'] = ner_result['start'] + len(word)
-
+  if device_id < 0 and device != "cpu" and ":" in device:
+    device_id = int(device.split(":")[-1])
+  sw = set(stopwords.get(src_lang, []))
+  if offset_key is None:
+    offset_key = 'offset'
+  if ner_key is None:
+    ner_key = 'ner'
+  if text_key is None:
+    text_key = 'text'
+  doc = {'text': sentence}
+  src_is_cjk = src_lang in ("zh", "ja", "ko", "th")
+  sep = "" if src_is_cjk else " "
+  if chunks is None:
+    chunks = chunkify(doc, src_lang, num_words_per_chunk)
+  if hf_pipelines is None:
+    hf_pipelines = load_hf_ner_pipelines(src_lang, device=device, device_id=device_id)
+  for hf_pipeline in hf_pipelines: 
+    results_arr = hf_pipeline['pipeline']([chunk[text_key] for chunk in chunks], batch_size=min(batch_size, len(chunks)))
+    results_arr2 = []
+    offset = 0
+    for chunk, results in zip(chunks, results_arr):
+      text = chunk[text_key]
+      _id = chunk['id']
+      ner = doc[ner_key] = doc.get(ner_key,{})
+      offset = chunk[offset_key]
+      len_text= len(text)
+      results = [ner_result for ner_result in results if ner_result['word'] not in ("[UNK]", "<unk>")]
+      if not results:
+        results_arr2.append([])
+        continue
+      results2 = []
+      if results[0]['start'] is not None: #TODO, test for the case where all the 'start' are '0'.
+        results.sort(key=lambda a: a['start'])
+      else:
+        results.sort(key=lambda a: a['index'])
+        i = 0
         for ner_result in results:
-          start = ner_result['start']
-          if start >= len_text: continue
-          if not cjk_detect(text[ner_result['start']:ner_result['end']]) and src_lang not in ("zh", "ja", "ko", "th"):
-                #strip the strip_chars
-                if text[start] not in strip_chars:
-                  for j in range(1, start):
-                    if start - j == -1 or text[start-j] in strip_chars:
-                      start = max(start -j, 0)
-                      break
-                end = ner_result['end']
-                if end < len_text and text[end] != ' ':
-                  end += len(text[end:].split(' ', 1)[0])
-          else:
-                start = ner_result['start']
-                end = ner_result['end']
-          #strip the strip_chars
-          while text[start] in strip_chars and start < len_text:
-            start += 1
-            if start >= end: break
-          #save away the ner result with the proper offset for this chunk
-          if start < len_text and start < end:
-              end = start + len(text[start:end].strip(strip_chars))
-              ner_result['word'] = text[start:end]
-              ner_result['start'] = start+offset
-              ner_result['end'] = end+offset
-          if results2 and results2[-1]['end'] > ner_result['start']:
-            continue
-          if start < len_text and start < end:
-              results2.append(ner_result)
-        results_arr2.append(results2)
-      results_arr = results_arr2
-      for chunk, results in zip(chunks, results_arr):
-          _id = chunk['id']
-          ner = doc[ner_key]
-          text = doc[text_key]
-          len_text = len(text)
-          results = [ner_result for ner_result in results if ner_result['word'] not in ("[UNK]", "<unk>")]
-          if not results: continue
-          prev_span = [0,0]
-          prev_tag_and_score = None
+          ner_result['word'] = word = ner_result['word'].rstrip('@@')
+          ner_result['start'] = text.index(word, i)
+          i = ner_result['start'] + 1
+          ner_result['end'] = ner_result['start'] + len(word)
+
+      for ner_result in results:
+        start = ner_result['start']
+        if start >= len_text: continue
+        if not cjk_detect(text[ner_result['start']:ner_result['end']]) and src_lang not in ("zh", "ja", "ko", "th"):
+              #strip the strip_chars
+              if text[start] not in strip_chars:
+                for j in range(1, start):
+                  if start - j == -1 or text[start-j] in strip_chars:
+                    start = max(start -j, 0)
+                    break
+              end = ner_result['end']
+              if end < len_text and text[end] != ' ':
+                end += len(text[end:].split(' ', 1)[0])
+        else:
+              start = ner_result['start']
+              end = ner_result['end']
+        #strip the strip_chars
+        while text[start] in strip_chars and start < len_text:
+          start += 1
+          if start >= end: break
+        #save away the ner result with the proper offset for this chunk
+        if start < len_text and start < end:
+            end = start + len(text[start:end].strip(strip_chars))
+            ner_result['word'] = text[start:end]
+            ner_result['start'] = start+offset
+            ner_result['end'] = end+offset
+        if results2 and results2[-1]['end'] > ner_result['start']:
+          continue
+        if start < len_text and start < end:
+            results2.append(ner_result)
+      results_arr2.append(results2)
+    results_arr = results_arr2
+    for chunk, results in zip(chunks, results_arr):
+      _id = chunk['id']
+      ner = doc[ner_key]
+      text = doc[text_key]
+      len_text = len(text)
+      results = [ner_result for ner_result in results if ner_result['word'] not in ("[UNK]", "<unk>")]
+      if not results: continue
+      prev_span = [0,0]
+      prev_tag_and_score = None
+      prev_word = ""
+      for ner_result in results:
+        start = ner_result['start']
+        if start is None:
           prev_word = ""
-          for ner_result in results:
-            start = ner_result['start']
-            if start is None:
-              prev_word = ""
-              continue
-            end = ner_result['end']
-            if text[start:end] != ner_result['word']:
-              logger.info ('offset mismatch', text[start:end], ner_result['word'])
-            if "-" in ner_result['entity']:
-              _, tag = ner_result['entity'].split('-')
-            else:
-              tag = ner_result['entity']
-            tag = tag.upper()
-            if tag in ('ADDRESS', 'STREET_ADDRESS'): tag = 'ADDRESS'
-            elif tag in ('PUBLIC_FIGURE',): tag = 'PUBLIC_FIGURE'
-            elif tag in ('NAME', 'PER', 'PERSON'): tag = 'PERSON'
-            elif tag in ('LOCATION', 'LOC', 'GPE'): tag = 'LOC'
-            elif tag in ('ORGANIZATION', 'ORG'): tag = 'ORG'
-            elif tag in ('AGE',): tag = 'AGE'
-            elif tag in ('NORP',): tag = 'NORP'
-            elif tag in ('BIO', 'SYMPTOM_AND_DISEASE', 'DISEASE' ): tag = 'DISEASE'
-            elif tag in ('PATIENT_ID', 'GOVT_ID', 'ID' ): tag = 'ID'
-            elif tag in ('USER', ): tag = 'USER'
-            elif tag in ('EMAIL', ): tag = 'EMAIL'
-            else: tag = 'MISC'
-            if tag_type and tag not in tag_type: continue
-            if prev_tag_and_score is not None:
-                if not ner_result['entity'].startswith('B-') and tag == prev_tag_and_score[0] and (prev_span[1] >= start - 5):
-                  #keep expanding this span and matched word and create a min score
-                  prev_span[1] =  max(prev_span[1], end)
-                  prev_word = prev_word + " " + ner_result['word']
-                  prev_tag_and_score[1] = min(prev_tag_and_score[1], ner_result['score']) 
-                  continue
-                else:
-                  if ner_result['entity'].startswith('B-'):
-                    if prev_span[1] > start:
-                      prev_span[1] = start
-                  if prev_span[0] != prev_span[1]:
-                    ner_word = text[prev_span[0]:prev_span[1]]
-                    mention = (ner_word, prev_span[0], prev_span[1])
-                    if ner_word and ner_word.lower() not in sw:
-                      aHash = ner.get(mention, {})
-                      aHash[prev_tag_and_score[0]] = aHash.get(prev_tag_and_score[0], 0) + weight * hf_pipeline['weight'] * prev_tag_and_score[1]
-                      ner[mention] = aHash
-                    prev_span = [start, end]
-                    prev_word = ner_result['word']
-            elif prev_tag_and_score is None:
-              prev_span = [start, end]
-              prev_word = ner_result['word']
-              
-            prev_tag_and_score = [tag, ner_result['score']]
+          continue
+        end = ner_result['end']
+        if text[start:end] != ner_result['word']:
+          logger.info ('offset mismatch', text[start:end], ner_result['word'])
+        if "-" in ner_result['entity']:
+          _, tag = ner_result['entity'].split('-')
+        else:
+          tag = ner_result['entity']
+        tag = tag.upper()
+        if tag in ('ADDRESS', 'STREET_ADDRESS'): tag = 'ADDRESS'
+        elif tag in ('PUBLIC_FIGURE',): tag = 'PUBLIC_FIGURE'
+        elif tag in ('NAME', 'PER', 'PERSON'): tag = 'PERSON'
+        elif tag in ('LOCATION', 'LOC', 'GPE'): tag = 'LOC'
+        elif tag in ('ORGANIZATION', 'ORG'): tag = 'ORG'
+        elif tag in ('AGE',): tag = 'AGE'
+        elif tag in ('NORP',): tag = 'NORP'
+        elif tag in ('BIO', 'SYMPTOM_AND_DISEASE', 'DISEASE' ): tag = 'DISEASE'
+        elif tag in ('PATIENT_ID', 'GOVT_ID', 'ID' ): tag = 'ID'
+        elif tag in ('USER', ): tag = 'USER'
+        elif tag in ('EMAIL', ): tag = 'EMAIL'
+        else: tag = 'MISC'
+        if tag_type and tag not in tag_type: continue
+        if prev_tag_and_score is None:
+          prev_span = [start, end]
+          prev_word = ner_result['word']
 
-          if prev_tag_and_score is not None and prev_span[0] != prev_span[1]:
-              ner_word = text[prev_span[0]:prev_span[1]]
-              mention = (ner_word, prev_span[0], prev_span[1])
-              if ner_word and ner_word.lower() not in sw:
-                  aHash = ner.get(mention, {})
-                  aHash[prev_tag_and_score[0]] = aHash.get(prev_tag_and_score[0], 0) + weight * hf_pipeline['weight'] * prev_tag_and_score[1]
-                  ner[mention] = aHash
+        elif not ner_result['entity'].startswith('B-') and tag == prev_tag_and_score[0] and (prev_span[1] >= start - 5):
+          #keep expanding this span and matched word and create a min score
+          prev_span[1] =  max(prev_span[1], end)
+          prev_word = f"{prev_word} " + ner_result['word']
+          prev_tag_and_score[1] = min(prev_tag_and_score[1], ner_result['score'])
+          continue
+        else:
+          if ner_result['entity'].startswith('B-') and prev_span[1] > start:
+            prev_span[1] = start
+          if prev_span[0] != prev_span[1]:
+            ner_word = text[prev_span[0]:prev_span[1]]
+            mention = (ner_word, prev_span[0], prev_span[1])
+            if ner_word and ner_word.lower() not in sw:
+              aHash = ner.get(mention, {})
+              aHash[prev_tag_and_score[0]] = aHash.get(prev_tag_and_score[0], 0) + weight * hf_pipeline['weight'] * prev_tag_and_score[1]
+              ner[mention] = aHash
+            prev_span = [start, end]
+            prev_word = ner_result['word']
+        prev_tag_and_score = [tag, ner_result['score']]
 
-    # now let's flatten into a 4 tuple which is expected by other functions. For the tag, we take the winning tag.
-    ners = [list(a) +  [max(Counter(b))] for a, b in doc[ner_key].items()]
-    models = load_kenlm_model(src_lang, pretrained_models=["wikipedia"] if src_lang not in  ('ig', 'zu', 'ny', 'sn', "st") else ["mc4"])
-    for i, a_ner in enumerate(ners):
-      ent = a_ner[0]
-      match, score, cutoff = check_for_common_name(src_lang, pretrained_models=["wikipedia"] if src_lang not in  ('ig', 'zu', 'ny', 'sn', "st") else ["mc4"], name=ent, kenlm_models=models, return_score=True)
-      if match:
+      if prev_tag_and_score is not None and prev_span[0] != prev_span[1]:
+          ner_word = text[prev_span[0]:prev_span[1]]
+          mention = (ner_word, prev_span[0], prev_span[1])
+          if ner_word and ner_word.lower() not in sw:
+              aHash = ner.get(mention, {})
+              aHash[prev_tag_and_score[0]] = aHash.get(prev_tag_and_score[0], 0) + weight * hf_pipeline['weight'] * prev_tag_and_score[1]
+              ner[mention] = aHash
+
+  # now let's flatten into a 4 tuple which is expected by other functions. For the tag, we take the winning tag.
+  ners = [list(a) +  [max(Counter(b))] for a, b in doc[ner_key].items()]
+  models = load_kenlm_model(src_lang, pretrained_models=["wikipedia"] if src_lang not in  ('ig', 'zu', 'ny', 'sn', "st") else ["mc4"])
+  for i, a_ner in enumerate(ners):
+    ent = a_ner[0]
+    match, score, cutoff = check_for_common_name(src_lang, pretrained_models=["wikipedia"] if src_lang not in  ('ig', 'zu', 'ny', 'sn', "st") else ["mc4"], name=ent, kenlm_models=models, return_score=True)
+    if match:
         #single word or short names may require an even lower cutoff
-        if src_is_cjk and len(ent) <= 3:
-          if score > cutoff/2: continue
-        elif sep not in ent:
-          if score > cutoff/2: continue
-        a_ner = list(a_ner)
-        a_ner[-1] = 'PUBLIC_FIGURE'
-        ners[i] = tuple(a_ner)
-    return ners
+      if (src_is_cjk and len(ent) <= 3 and score > cutoff / 2
+          or (not src_is_cjk or len(ent) > 3) and sep not in ent
+          and score > cutoff / 2): continue
+      a_ner = list(a_ner)
+      a_ner[-1] = 'PUBLIC_FIGURE'
+      ners[i] = tuple(a_ner)
+  return ners
 
 
 if __name__ == "__main__":

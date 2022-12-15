@@ -82,7 +82,9 @@ class OntologyBuilder (OntologyManager, OntologyBuilderData):
     data_dir = self.data_dir
     if not os.path.exists(f"{tmp_dir}/conceptnet-assertions-5.7.0.csv"):
       if not os.path.exists(f"{tmp_dir}/conceptnet-assertions-5.7.0.csv.gz"):
-        os.system(f"wget https://s3.amazonaws.com/conceptnet/downloads/2019/edges/conceptnet-assertions-5.7.0.csv.gz")
+        os.system(
+            "wget https://s3.amazonaws.com/conceptnet/downloads/2019/edges/conceptnet-assertions-5.7.0.csv.gz"
+        )
         os.system(f"mv ./conceptnet-assertions-5.7.0.csv.gz {tmp_dir}")
       os.system(f"gzip -d {tmp_dir}/conceptnet-assertions-5.7.0.csv.gz")
     
@@ -136,18 +138,15 @@ class OntologyBuilder (OntologyManager, OntologyBuilderData):
     if not os.path.exists(f"{tmp_dir}/isa.csv"):
         os.system(f"grep 'IsA\/' {tmp_dir}/conceptnet-assertions-5.7.0.csv > {tmp_dir}/isa.csv")
     rel2 = OrderedDict()
-    for rel_type in ('syn', 'sim', 'deri', 'erel', 'ederi', 'rel', 'formof','isa') : #'dest', 'anti', 'manner', 
-      i = 0
+    i = 0
+    for rel_type in ('syn', 'sim', 'deri', 'erel', 'ederi', 'rel', 'formof','isa'): #'dest', 'anti', 'manner', 
       with open(f"{tmp_dir}/{rel_type}.csv", "rb") as f:
         while True:
           rel = f.readline()
           if not rel: break
           rel = rel.decode()
           rel = rel.split('\t')[0]
-          rel = rel.strip(']').split(',/c/')[1:]
-          if not rel:
-            continue
-          else:
+          if rel := rel.strip(']').split(',/c/')[1:]:
             if len(rel) < 2:
               continue
             a = rel[0]
@@ -171,12 +170,12 @@ class OntologyBuilder (OntologyManager, OntologyBuilderData):
                 val = rel2[b] + [a,b]
                 del rel2[b]
               rel2[a]  =  rel2.get(a, []) +  val
-          #i+= 1
-          #if i > 10000:
-          #  break
+                #i+= 1
+                #if i > 10000:
+                #  break
       for key in list(rel2.keys()):
         rel2[key] = list(set(rel2[key]))
-        
+
     return rel2
 
   def create_cn_ontology(self):
@@ -205,25 +204,23 @@ class OntologyBuilder (OntologyManager, OntologyBuilderData):
     for key, val in rel.items():
       if len(val) < 6:
         val2 = [(word2wncat[v] if v in word2wncat else (word2wncat[v.split("_")[0]] if v.split("_")[0] in word2wncat else word2wncat[v.split("_")[-1]]),v) for v in val if (v in word2wncat) or (v.split("_")[0] in word2wncat) or (v.split("_")[-1] in word2wncat)]
-        if  val2: 
+        if val2: 
           val3 = [v for v in val if v not in val2]
           itr = itertools.groupby(val2, lambda x : x[0])
           groups = [(key, list(group)) for key, group in itr]
           groups.sort(key=lambda a: len(a[1]))
           max_cat = groups[-1][0]
 
-          if max_cat != '*':
-            # infer category of other words in this group if majority of labels is max_cat
-            if len(groups[-1][1])*2 >= len(val):
-              for word in val3:
-                if word in word2wncat:
-                  if wncat != word2wncat[word]:
-                    word2wncat[word]='*'
-                  else:
-                    groups[-1][1].append((max_cat, word))
+          if max_cat != '*' and len(groups[-1][1]) * 2 >= len(val):
+            for word in val3:
+              if word in word2wncat:
+                if wncat != word2wncat[word]:
+                  word2wncat[word]='*'
                 else:
-                  word2wncat[word] = max_cat
                   groups[-1][1].append((max_cat, word))
+              else:
+                word2wncat[word] = max_cat
+                groups[-1][1].append((max_cat, word))
           all = {}
           for key, group in groups:
             if key == '*': continue
@@ -280,75 +277,72 @@ class OntologyBuilder (OntologyManager, OntologyBuilderData):
     return rel2, cat2word
     
   def create_eng2multilang_dict(self):
-      tmp_dir = self.tmp_dir
-      if hasattr(self, 'word2lang') and self.word2lang: return
-      if os.path.exists(f"{tmp_dir}/conceptnet_en.json"):
-        self.en = json.load(open(f"{tmp_dir}/conceptnet_en.json", "rb"))
-        self.word2en = json.load(open(f"{tmp_dir}/conceptnet_word2en.json", "rb"))
-        self.word2lang= json.load(open(f"{tmp_dir}/conceptnet_word2lang.json", "rb"))
-        return
-      self.load_cn_data()
-      if not os.path.exists(f"{tmp_dir}/syn.csv"):
-        os.system(f"grep '\/r\/Synonym\/' {tmp_dir}/conceptnet-assertions-5.7.0.csv > {tmp_dir}/syn.csv") 
-      mt5_tok = transformers.AutoTokenizer.from_pretrained("google/mt5-small")
-      rel2 = OrderedDict()
-      word2lang = {}
-      for rel_type in ('syn', ) :
-        i = 0
-        rel =  open(f"{tmp_dir}/{rel_type}.csv", "rb").read().decode().split('\n')
-        rel = [s.split('\t')[0] for s in rel]
-        rel = [s.strip(']').split(',/c/')[1:] for s in rel]
-        for s in rel:
-          if len(s) < 2:
-            continue
-          a = s[0]
-          b = s[1]
-          a = a.split('/')
-          lang1 = a[0]
-          
-          a = a[1]
-          b = b.split('/')
-          lang2 = b[0]
-          b = b[1]
-          word2lang[a.replace(" ", "_").replace("-", "_").lower().strip(".")] = list(set(word2lang.get(a.replace(" ", "_").replace("-", "_").lower().strip("."), [])+[lang1]))
-          word2lang[b.replace(" ", "_").replace("-", "_").lower().strip(".")] = list(set(word2lang.get(b.replace(" ", "_").replace("-", "_").lower().strip("."), [])+[lang2]))
-          if a == b:
-            continue
-          if lang2 == 'en':
-            tmp = b
-            b = a
-            a = tmp
-          if lang1 in ('zh', 'ja', 'ko') and self.cjk_detect(a):
-            a = "_".join(mt5_tok.tokenize(a)).replace(mt5_underscore,"_").replace("__", "_").replace("__", "_").strip("_")
-            #print (a)
-          if lang2 in ('zh', 'ja', 'ko') and self.cjk_detect(b):
-            b = "_".join(mt5_tok.tokenize(b)).replace(mt5_underscore,"_").replace("__", "_").replace("__", "_").strip("_")
-          val = [a,b]
-          if lang1 != 'en' and lang2 != 'en': continue
-          if  lang1 == 'en' and lang2 == 'en': continue
-          if True:
-            #if b in rel2:
-            #  val = rel2[b] + [a,b]
-            #  del rel2[b]
-            rel2[a]  =  rel2.get(a, []) +  val
-          i+= 1
-          #if i > 10000:
-          #  break
+    tmp_dir = self.tmp_dir
+    if hasattr(self, 'word2lang') and self.word2lang: return
+    if os.path.exists(f"{tmp_dir}/conceptnet_en.json"):
+      self.en = json.load(open(f"{tmp_dir}/conceptnet_en.json", "rb"))
+      self.word2en = json.load(open(f"{tmp_dir}/conceptnet_word2en.json", "rb"))
+      self.word2lang= json.load(open(f"{tmp_dir}/conceptnet_word2lang.json", "rb"))
+      return
+    self.load_cn_data()
+    if not os.path.exists(f"{tmp_dir}/syn.csv"):
+      os.system(f"grep '\/r\/Synonym\/' {tmp_dir}/conceptnet-assertions-5.7.0.csv > {tmp_dir}/syn.csv")
+    mt5_tok = transformers.AutoTokenizer.from_pretrained("google/mt5-small")
+    rel2 = OrderedDict()
+    word2lang = {}
+    for rel_type in ('syn', ):
+      i = 0
+      rel =  open(f"{tmp_dir}/{rel_type}.csv", "rb").read().decode().split('\n')
+      rel = [s.split('\t')[0] for s in rel]
+      rel = [s.strip(']').split(',/c/')[1:] for s in rel]
+      for s in rel:
+        if len(s) < 2:
+          continue
+        a = s[0]
+        b = s[1]
+        a = a.split('/')
+        lang1 = a[0]
 
-        for key in list(rel2.keys()):
-          rel2[key] = list(set(rel2[key]))
-      self.en = rel2
-      word2en = {}
-      for r, words in rel2.items():
-        for word in words:
-          word2en[word] = set(list(word2en.get(word, []))+ [r])
-      self.word2en = word2en
-      self.word2lang = word2lang
-      for key in list(self.word2en.keys()):
-        self.word2en[key] = dict([(a,1) for a in self.word2en[key]])
-      json.dump(self.en, open(f"{tmp_dir}/conceptnet_en.json", "w", encoding="utf8"), indent=1)
-      json.dump(self.word2en, open(f"{tmp_dir}/conceptnet_word2en.json", "w", encoding="utf8"), indent=1)
-      json.dump(self.word2lang, open(f"{tmp_dir}/conceptnet_word2lang.json", "w", encoding="utf8"), indent=1)
+        a = a[1]
+        b = b.split('/')
+        lang2 = b[0]
+        b = b[1]
+        word2lang[a.replace(" ", "_").replace("-", "_").lower().strip(".")] = list(set(word2lang.get(a.replace(" ", "_").replace("-", "_").lower().strip("."), [])+[lang1]))
+        word2lang[b.replace(" ", "_").replace("-", "_").lower().strip(".")] = list(set(word2lang.get(b.replace(" ", "_").replace("-", "_").lower().strip("."), [])+[lang2]))
+        if a == b:
+          continue
+        if lang2 == 'en':
+          b, a = a, b
+        if lang1 in ('zh', 'ja', 'ko') and self.cjk_detect(a):
+          a = "_".join(mt5_tok.tokenize(a)).replace(mt5_underscore,"_").replace("__", "_").replace("__", "_").strip("_")
+          #print (a)
+        if lang2 in ('zh', 'ja', 'ko') and self.cjk_detect(b):
+          b = "_".join(mt5_tok.tokenize(b)).replace(mt5_underscore,"_").replace("__", "_").replace("__", "_").strip("_")
+        val = [a,b]
+        if lang1 != 'en' and lang2 != 'en': continue
+        if  lang1 == 'en' and lang2 == 'en': continue
+        #if b in rel2:
+        #  val = rel2[b] + [a,b]
+        #  del rel2[b]
+        rel2[a]  =  rel2.get(a, []) +  val
+        i+= 1
+              #if i > 10000:
+              #  break
+
+      for key in list(rel2.keys()):
+        rel2[key] = list(set(rel2[key]))
+    self.en = rel2
+    word2en = {}
+    for r, words in rel2.items():
+      for word in words:
+        word2en[word] = set(list(word2en.get(word, []))+ [r])
+    self.word2en = word2en
+    self.word2lang = word2lang
+    for key in list(self.word2en.keys()):
+      self.word2en[key] = dict([(a,1) for a in self.word2en[key]])
+    json.dump(self.en, open(f"{tmp_dir}/conceptnet_en.json", "w", encoding="utf8"), indent=1)
+    json.dump(self.word2en, open(f"{tmp_dir}/conceptnet_word2en.json", "w", encoding="utf8"), indent=1)
+    json.dump(self.word2lang, open(f"{tmp_dir}/conceptnet_word2lang.json", "w", encoding="utf8"), indent=1)
 
 
   def cjk_detect(self, texts):
@@ -359,9 +353,7 @@ class OntologyBuilder (OntologyManager, OntologyBuilderData):
     if re.search("[\u3040-\u30ff]", texts):
         return "ja"
     # chinese
-    if re.search("[\u4e00-\u9FFF]", texts):
-        return "zh"
-    return None
+    return "zh" if re.search("[\u4e00-\u9FFF]", texts) else None
 
   def yago_step0(self):
     tmp_dir = self.tmp_dir
@@ -402,7 +394,7 @@ class OntologyBuilder (OntologyManager, OntologyBuilderData):
     tmp_dir = self.tmp_dir
     data_dir = self.data_dir
     if  os.path.exists(f"{tmp_dir}/yago_ontology.tsv"):
-      return 
+      return
     if not os.path.exists(f"{tmp_dir}/yago0.tsv"):
       self.yago_step0()
 
@@ -422,23 +414,44 @@ class OntologyBuilder (OntologyManager, OntologyBuilderData):
                 entity, cat = line.split("\t")
                 entity=entity.strip(".")
                 entityArr = entity.split("_")
-                if entityArr[-1] in {"a", "and", "the", "or", "the", "of", "to", "in", "on", "from"}:
+                if entityArr[-1] in {
+                    "a",
+                    "and",
+                    "or",
+                    "the",
+                    "of",
+                    "to",
+                    "in",
+                    "on",
+                    "from",
+                }:
                   entity = "_".join(entityArr[:-1])
                 cat = self.yago_upper_ontology.get(cat, cat)
                 if "|" in entity:
                   entityArr = entity.split("|")
                   entity, en = entityArr[0], entityArr[1]
-                  #print (entityArr)
-                  #if len(entityArr) > 2:
-                    #print (entityArr)
                   entity=entity.strip(".")
                   entityArr = entity.split("_")
-                  if entityArr[-1] in {"a", "and", "the", "or", "the", "of", "to", "in", "on", "from"}:
+                  if entityArr[-1] in {
+                      "a",
+                      "and",
+                      "or",
+                      "the",
+                      "of",
+                      "to",
+                      "in",
+                      "on",
+                      "from",
+                  }:
                     entity = "_".join(entityArr[:-1])
                   word2en[entity] = en
                 if prev_entity and entity != prev_entity:
-                  if ('DOMAIN_NAME' in cats and not prev_entity.endswith(".com")) or ('WORK_OF_ART' in cats and not (prev_entity.count("_") <= 4 and (":" in prev_entity or prev_entity[-1] == "1"))):
-                    a.write (prev_entity.translate(trannum)+"\n") 
+                  if (('DOMAIN_NAME' in cats
+                       and not prev_entity.endswith(".com"))
+                      or 'WORK_OF_ART' in cats and
+                      (prev_entity.count("_") > 4
+                       or ":" not in prev_entity and prev_entity[-1] != "1")):
+                    a.write (prev_entity.translate(trannum)+"\n")
                   else:
                     cats = [a for a in Counter(cats).most_common() if a[0] !='THING']
                     if cats and prev_entity.count("_") <= 4:
@@ -446,21 +459,23 @@ class OntologyBuilder (OntologyManager, OntologyBuilderData):
                     else:
                       p.write (prev_entity.translate(trannum)+"\n")
                   cats = [cat]
-                  prev_entity = entity
                 else:
                   cats.append(cat)
-                  prev_entity = entity
+                prev_entity = entity
               if cats:
-                  if ('DOMAIN_NAME' in cats and not prev_entity.endswith(".com")) or ('WORK_OF_ART' in cats and not (prev_entity.count("_") <= 4 and (":" in prev_entity or prev_entity[-1] == "1"))):
-                    a.write (prev_entity.translate(trannum)+"\n") 
+                if (('DOMAIN_NAME' in cats and not prev_entity.endswith(".com"))
+                    or 'WORK_OF_ART' in cats and
+                    (prev_entity.count("_") > 4
+                     or ":" not in prev_entity and prev_entity[-1] != "1")):
+                  a.write (prev_entity.translate(trannum)+"\n")
+                else:
+                  cats = [a for a in Counter(cats).most_common() if a[0] !='THING']
+                  if cats and prev_entity.count("_") <= 4:
+                    o.write (prev_entity.translate(trannum) +"\t" +cats[0][0]+"\n")
                   else:
-                    cats = [a for a in Counter(cats).most_common() if a[0] !='THING']
-                    if cats and prev_entity.count("_") <= 4:
-                      o.write (prev_entity.translate(trannum) +"\t" +cats[0][0]+"\n")
-                    else:
-                      p.write (prev_entity.translate(trannum)+"\n")
+                    p.write (prev_entity.translate(trannum)+"\n")
           os.system(f"sort --parallel=32 {tmp_dir}/yago{_idx}.tsv --o {tmp_dir}/yago{_idx}.tsv")
-                                            
+
     os.system(f"cp {tmp_dir}/yago{_idx}.tsv {tmp_dir}/yago_ontology.tsv")
 
   def yago_step2(self):
@@ -522,7 +537,7 @@ class OntologyBuilder (OntologyManager, OntologyBuilderData):
 
       synset= None
       try:
-        synset= wn.synset(word+'.n.01')
+        synset = wn.synset(f'{word}.n.01')
       except:
         if label != 'PERSON':
           try:
@@ -594,13 +609,14 @@ class OntologyBuilder (OntologyManager, OntologyBuilderData):
           if event in hype:
             new_yago_ontology[word] = label
             continue
-        if commodity in hype or vehicle in hype or artifact in hype or \
-            plant in hype or molecule in hype or compound in hype or event in hype or \
-            animal in hype or fac in hype or group in hype or symptom in hype or location in hype or \
-            infectious_agent in hype or symptom in hype or disease in hype or physical_condition in hype or \
-            body_part in hype or substance in hype or food in hype or act in hype or \
-            process in hype:
-            continue    
+        if (commodity in hype or vehicle in hype or artifact in hype
+            or plant in hype or molecule in hype or compound in hype
+            or event in hype or animal in hype or fac in hype or group in hype
+            or symptom in hype or location in hype or infectious_agent in hype
+            or disease in hype or physical_condition in hype or body_part in hype
+            or substance in hype or food in hype or act in hype
+            or process in hype):
+          continue    
 
       if label in ('PERSON',) or synset is None:
           new_yago_ontology[word] = label
@@ -623,7 +639,7 @@ class OntologyBuilder (OntologyManager, OntologyBuilderData):
       self.ner2word = json.load(open(f"{tmp_dir}/conceptnet_yago_combined.json", "rb"))
       self.yago2ner = [tuple(a) for a in json.load(open(f"{tmp_dir}/yago2ner.json", "rb"))]
       return
-    
+
     mt5_tok = transformers.AutoTokenizer.from_pretrained("google/mt5-small")
 
     cat2word_list = list(json.load(open(f"{tmp_dir}/conceptnet_ontology_cat2word.json")).items())
@@ -631,10 +647,9 @@ class OntologyBuilder (OntologyManager, OntologyBuilderData):
     ner2word = {}
     #cat2ner_map = dict([ ('person', 'PUBLIC_FIGURE'), ('body', 'ANAT'), ('artifact', 'PRODUCT'), ('medicine', 'MEDICAL_THERAPY',), ('plant', 'PLANT'), ('animal', 'ANIMAL'),  ('location', 'LOCATION'),  ('language', 'LANGUAGE'), ('substance', 'SUBSTANCE'), ('state', 'DISEASE'), ('group', 'ORG'), ('time', 'DATE'), ('law', 'LAW'), ('food', 'FOOD'), ('quantity', 'QUANTITY')])
     cat2ner_map = dict([ ('person', 'PUBLIC_FIGURE'),  ('medicine', 'MEDICAL_THERAPY',), ('plant', 'PLANT'), ('animal', 'ANIMAL'),   ('language', 'LANGUAGE'), ('substance', 'SUBSTANCE'),  ('group', 'ORG'), ('time', 'DATE'), ('law', 'LAW'), ('food', 'FOOD'), ('quantity', 'QUANTITY')])
-    
+
     for cat, words in cat2word_list:
-      label = cat2ner_map.get(cat)
-      if label:
+      if label := cat2ner_map.get(cat):
         for word in words:
           if self.cjk_detect(word):
             word = "_".join(mt5_tok.tokenize(word.replace("_", ""))).replace(mt5_underscore,"_").replace("__", "_").replace("__", "_").strip("_")   

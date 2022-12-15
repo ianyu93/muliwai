@@ -10,6 +10,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+
 import re
 import fsspec
 import copy
@@ -56,13 +57,12 @@ try:
   import neuralcoref
 except:
   neuralcoref = None
-  pass
 import sys
 try:
     sys.path.append(os.path.abspath(os.path.dirname(__file__)))         
 except:
     pass
- 
+
 from text_augment import *
 
 if __name__ == "__main__":
@@ -179,10 +179,7 @@ if __name__ == "__main__":
     args.anon_scope = set(args.anon_scope.split(","))
     args.aug_scope = set(args.aug_scope.split(","))
     src_lang = args.src_lang
-    if src_lang is not None:
-      src_lang = src_lang.split(",")
-    else:
-      src_lang = ["en"]
+    src_lang = src_lang.split(",") if src_lang is not None else ["en"]
     if not args.do_trans:
       do_backtrans = False
       target_lang = src_lang
@@ -199,13 +196,11 @@ if __name__ == "__main__":
     num_workers = args.num_workers
     if cutoff <= 0:
       cutoff = None
-    if outfile is None:
-      if infile is not None:
-        outfile = "out.jsonl"
+    if outfile is None and infile is not None:
+      outfile = "out.jsonl"
     docs = TextAugment.deserialize_ner_items(infile=infile) if infile else None
     if args.preload_cache: 
       TextAugment.preload_cache(src_lang or ["en"], target_lang)
-    #TODO - do multiprocessing
     elif src_lang is not None:
       if num_workers > 1:
         TextAugment.multiprocess_ner(docs,
@@ -246,10 +241,7 @@ if __name__ == "__main__":
         else:
             all_docs = [([docs], src_lang[0], target_lang[0])]
 
-        if outfile is not None:
-            _file =  open(outfile, 'w', encoding='utf-8')
-        else:
-            _file = None
+        _file = open(outfile, 'w', encoding='utf-8') if outfile is not None else None
         for docs_iter, src_lang, target_lang in all_docs:
             if outfile is None:
                 if _file is not None: _file.close()

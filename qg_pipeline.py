@@ -44,16 +44,18 @@ class QGPipeline:
             else:  
                 self.model = self.model.half().to(device)
 
-        if self.ans_model is not self.model:
-            if self.ans_model.device != self.device:
-                self.ans_model.to(self.device).eval()
-                if device == "cpu":
-                    self.ans_model = torch.quantization.quantize_dynamic(self.ans_model.float(), {torch.nn.Linear}, dtype=torch.qint8)
-                else:  
-                    self.ans_model = self.ans_model.half().to(device)
+        if (
+            self.ans_model is not self.model
+            and self.ans_model.device != self.device
+        ):
+            self.ans_model.to(self.device).eval()
+            if device == "cpu":
+                self.ans_model = torch.quantization.quantize_dynamic(self.ans_model.float(), {torch.nn.Linear}, dtype=torch.qint8)
+            else:  
+                self.ans_model = self.ans_model.half().to(device)
 
         assert self.model.__class__.__name__ in ["T5ForConditionalGeneration", "BartForConditionalGeneration"]
-        
+
         if "T5ForConditionalGeneration" in self.model.__class__.__name__:
             self.model_type = "t5"
         else:
@@ -65,55 +67,59 @@ class QGPipeline:
         ret = []
         with torch.no_grad():
           
-          if type(inputs) is str:
-            inputs = [inputs]
-          default_answers=[]
-          if 'default_answers' in generate_kwargs:
-            default_answers = generate_kwargs['default_answers']
-            if type(default_answers[0]) is str:
-              default_answers = [default_answers] * len(inputs)
-          if len(default_answers) < len(inputs):
-            default_answers.extend([[]]*(len(inputs)-len(default_answers)))
-          #TODO - we could do in batches that is approximately N words to maximize GPU usage
-          for input, default_answer in zip(inputs, default_answers):
-            qg_examples = []
-            input = " ".join(input.split())
-            sents, answers = self._extract_answers(input)
-            if self.default_answers:
-              answers.append(self.default_answers)
-            if default_answer:
-              answers.append(default_answer)
-            flat_answers = list(itertools.chain(*answers))
-            
-            if len(flat_answers) == 0:
-              ret.append([])
-              continue
-            answers = [flat_answers]*len(sents) # multi-way q/a
-            if self.qg_format == "prepend":
-                qg_examples.extend(self._prepare_inputs_for_qg_from_answers_prepend(inputs, answers))
-            else:
-                qg_examples.extend(self._prepare_inputs_for_qg_from_answers_hl(sents, answers))
-            if  qg_examples:
-              qg_inputs = [example['source_text'] for example in qg_examples]
-              questions = self._generate_questions(qg_inputs)
-              output = list(set([(example['answer'], que) for example, que in zip(qg_examples, questions)]))
-              ret.append([{'answer': answer, 'question': que} for answer, que in output])
-            else:
-              ret.append([])
+            if type(inputs) is str:
+              inputs = [inputs]
+            default_answers=[]
+            if 'default_answers' in generate_kwargs:
+              default_answers = generate_kwargs['default_answers']
+              if type(default_answers[0]) is str:
+                default_answers = [default_answers] * len(inputs)
+            if len(default_answers) < len(inputs):
+              default_answers.extend([[]]*(len(inputs)-len(default_answers)))
+                  #TODO - we could do in batches that is approximately N words to maximize GPU usage
+            for input, default_answer in zip(inputs, default_answers):
+                qg_examples = []
+                input = " ".join(input.split())
+                sents, answers = self._extract_answers(input)
+                if self.default_answers:
+                  answers.append(self.default_answers)
+                if default_answer:
+                  answers.append(default_answer)
+                flat_answers = list(itertools.chain(*answers))
+
+                if not flat_answers:
+                    ret.append([])
+                    continue
+                answers = [flat_answers]*len(sents) # multi-way q/a
+                if self.qg_format == "prepend":
+                    qg_examples.extend(self._prepare_inputs_for_qg_from_answers_prepend(inputs, answers))
+                else:
+                    qg_examples.extend(self._prepare_inputs_for_qg_from_answers_hl(sents, answers))
+                if qg_examples:
+                    qg_inputs = [example['source_text'] for example in qg_examples]
+                    questions = self._generate_questions(qg_inputs)
+                    output = list(
+                        {
+                            (example['answer'], que)
+                            for example, que in zip(qg_examples, questions)
+                        }
+                    )
+                    ret.append([{'answer': answer, 'question': que} for answer, que in output])
+                else:
+                    ret.append([])
         return ret
     
     def _generate_questions(self, inputs):
         inputs = self._tokenize(inputs, padding=True, truncation=True)
-        
+
         outs = self.model.generate(
             input_ids=inputs['input_ids'].to(self.device), 
             attention_mask=inputs['attention_mask'].to(self.device), 
             max_length=32,
             num_beams=4,
         )
-        
-        questions = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in outs]
-        return questions
+
+        return [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in outs]
     
     def _extract_answers(self, context):
         sents, inputs = self._prepare_inputs_for_ans_extraction(context)
@@ -158,12 +164,12 @@ class QGPipeline:
             source_text = "extract answers:"
             for j, sent in enumerate(sents):
                 if i == j:
-                    sent = "<hl> %s <hl>" % sent
-                source_text = "%s %s" % (source_text, sent)
+                    sent = f"<hl> {sent} <hl>"
+                source_text = f"{source_text} {sent}"
                 source_text = source_text.strip()
-            
+
             if self.model_type == "t5":
-                source_text = source_text + " </s>"
+                source_text = f"{source_text} </s>"
             inputs.append(source_text)
 
         return sents, inputs
@@ -175,21 +181,21 @@ class QGPipeline:
             for answer_text in answer:
                 sent = sents[i]
                 sents_copy = sents[:]
-                
+
                 answer_text = answer_text.strip()
                 if answer_text.lower() not in sent.lower(): continue
                 ans_start_idx = sent.lower().index(answer_text.lower())
-                
+
                 sent = f"{sent[:ans_start_idx]} <hl> {answer_text} <hl> {sent[ans_start_idx + len(answer_text): ]}"
                 sents_copy[i] = sent
-                
+
                 source_text = " ".join(sents_copy)
-                source_text = f"generate question: {source_text}" 
+                source_text = f"generate question: {source_text}"
                 if self.model_type == "t5":
-                    source_text = source_text + " </s>"
-                
+                    source_text = f"{source_text} </s>"
+
                 inputs.append({"answer": answer_text, "source_text": source_text})
-        
+
         return inputs
     
     def _prepare_inputs_for_qg_from_answers_prepend(self, context, answers):
@@ -198,8 +204,8 @@ class QGPipeline:
         for answer in flat_answers:
             source_text = f"answer: {answer} context: {context}"
             if self.model_type == "t5":
-                source_text = source_text + " </s>"
-            
+                source_text = f"{source_text} </s>"
+
             examples.append({"answer": answer, "source_text": source_text})
         return examples
 
@@ -219,21 +225,20 @@ class MultiTaskQAQGPipeline(QGPipeline):
     def _prepare_inputs_for_qa(self, question, context):
         source_text = f"question: {question}  context: {context}"
         if self.model_type == "t5":
-            source_text = source_text + " </s>"
+            source_text = f"{source_text} </s>"
         return  source_text
     
     def _extract_answer(self, question, context):
         source_text = self._prepare_inputs_for_qa(question, context)
         inputs = self._tokenize([source_text], padding=False)
-    
+
         outs = self.model.generate(
             input_ids=inputs['input_ids'].to(self.device), 
             attention_mask=inputs['attention_mask'].to(self.device), 
             max_length=16,
         )
 
-        answer = self.tokenizer.decode(outs[0], skip_special_tokens=True)
-        return answer
+        return self.tokenizer.decode(outs[0], skip_special_tokens=True)
 
 
 class E2EQGPipeline:
@@ -297,10 +302,9 @@ class E2EQGPipeline:
     def _prepare_inputs_for_e2e_qg(self, context):
         source_text = f"generate questions: {context}"
         if self.model_type == "t5":
-            source_text = source_text + " </s>"
-        
-        inputs = self._tokenize([source_text], padding=False)
-        return inputs
+            source_text = f"{source_text} </s>"
+
+        return self._tokenize([source_text], padding=False)
     
     def _tokenize(
         self,
@@ -357,18 +361,22 @@ def pipeline(
 
     # Retrieve the task
     if task not in SUPPORTED_TASKS:
-        raise KeyError("Unknown task {}, available tasks are {}".format(task, list(SUPPORTED_TASKS.keys())))
+        raise KeyError(
+            f"Unknown task {task}, available tasks are {list(SUPPORTED_TASKS.keys())}"
+        )
 
     targeted_task = SUPPORTED_TASKS[task]
     task_class = targeted_task["impl"]
-    models_same=False
     # Use default model/config/tokenizer for the task if no model is provided
     if model is None:
         model = targeted_task["default"]["model"]
     if ans_model is None:
         ans_model = targeted_task["default"].get("ans_model", None)
-    if isinstance(model, str) and isinstance(ans_model, str) and model == ans_model:
-      models_same = True
+    models_same = (
+        isinstance(model, str)
+        and isinstance(ans_model, str)
+        and model == ans_model
+    )
     # Try to infer tokenizer from model or config name (if provided as str)
     if tokenizer is None:
         if isinstance(model, str):
@@ -379,7 +387,7 @@ def pipeline(
                 "Impossible to guess which tokenizer to use. "
                 "Please provided a PretrainedTokenizer class or a path/identifier to a pretrained tokenizer."
             )
-    
+
     # Instantiate tokenizer if needed
     if isinstance(tokenizer, (str, tuple)):
         if isinstance(tokenizer, tuple):
@@ -389,8 +397,8 @@ def pipeline(
             print(tokenizer)
             tokenizer = AutoTokenizer.from_pretrained(tokenizer)
 
-                
-    
+
+
     # Instantiate model if needed
     if isinstance(model, str):
         model = AutoModelForSeq2SeqLM.from_pretrained(model).eval()
@@ -398,21 +406,25 @@ def pipeline(
             model = torch.quantization.quantize_dynamic(model, {torch.nn.Linear}, dtype=torch.qint8)
         else:
             model = model.half().to(device)
-                
-    if task == "question-generation":
+
+    if task == "e2e-qg":
+        return task_class(model=model, tokenizer=tokenizer, device=device)
+    elif task == "question-generation":
         if ans_model is None:
             # load default ans model
             ans_model = targeted_task["default"]["ans_model"]
             ans_tokenizer = AutoTokenizer.from_pretrained(ans_model)
             if models_same:
-              ans_model = model
+                ans_model = model
             else:
-              ans_model = AutoModelForSeq2SeqLM.from_pretrained(ans_model).eval()
-              if device == "cpu":
-                ans_model = torch.quantization.quantize_dynamic(ans_model, {torch.nn.Linear}, dtype=torch.qint8)
-              else:
-                ans_model = ans_model.half().to(device)
-                
+                ans_model = AutoModelForSeq2SeqLM.from_pretrained(ans_model).eval()
+                ans_model = (
+                    torch.quantization.quantize_dynamic(
+                        ans_model, {torch.nn.Linear}, dtype=torch.qint8
+                    )
+                    if device == "cpu"
+                    else ans_model.half().to(device)
+                )
         else:
             # Try to infer tokenizer from model or config name (if provided as str)
             if models_same:
@@ -426,27 +438,27 @@ def pipeline(
                         "Impossible to guess which tokenizer to use. "
                         "Please provided a PretrainedTokenizer class or a path/identifier to a pretrained tokenizer."
                     )
-            
+
             # Instantiate tokenizer if needed
             if isinstance(ans_tokenizer, (str, tuple)):
-                if isinstance(ans_tokenizer, tuple):
-                    # For tuple we have (tokenizer name, {kwargs})
-                    ans_tokenizer = AutoTokenizer.from_pretrained(ans_tokenizer[0], **ans_tokenizer[1])
-                else:
-                    ans_tokenizer = AutoTokenizer.from_pretrained(ans_tokenizer)
-
+                ans_tokenizer = (
+                    AutoTokenizer.from_pretrained(
+                        ans_tokenizer[0], **ans_tokenizer[1]
+                    )
+                    if isinstance(ans_tokenizer, tuple)
+                    else AutoTokenizer.from_pretrained(ans_tokenizer)
+                )
             if models_same:
-              ans_model = model
+                ans_model = model
             elif isinstance(ans_model, str):
                 ans_model = AutoModelForSeq2SeqLM.from_pretrained(ans_model).eval()
-                if device == "cpu":
-                    ans_model = torch.quantization.quantize_dynamic(ans_model, {torch.nn.Linear}, dtype=torch.qint8)
-                else:
-                    ans_model = ans_model.half().to(device)
-    
-    if task == "e2e-qg":
-        return task_class(model=model, tokenizer=tokenizer, device=device)
-    elif task == "question-generation":
+                ans_model = (
+                    torch.quantization.quantize_dynamic(
+                        ans_model, {torch.nn.Linear}, dtype=torch.qint8
+                    )
+                    if device == "cpu"
+                    else ans_model.half().to(device)
+                )
         return task_class(model=model, tokenizer=tokenizer, ans_model=ans_model, ans_tokenizer=ans_tokenizer, qg_format=qg_format, device=device)
     else:
         return task_class(model=model, tokenizer=tokenizer, ans_model=model, ans_tokenizer=tokenizer, qg_format=qg_format, device=device)

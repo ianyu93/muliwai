@@ -10,6 +10,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+
 import re
 import fsspec
 import copy
@@ -53,7 +54,6 @@ try:
   import neuralcoref
 except:
   neuralcoref = None
-  pass
 import sys
 try:
     sys.path.append(os.path.abspath(os.path.dirname(__file__)))
@@ -110,7 +110,7 @@ class TextAugmentDeviceModel:
   def __init__(self, device_id=None, device=None):
     if device_id is not None:
       self.device_id = int(device_id)
-      self.device = "cpu" if device_id < 0 else "cuda:"+str(device_id)
+      self.device = "cpu" if device_id < 0 else f"cuda:{str(device_id)}"
     elif device is not None:
       self.device=device
       self.device_id = -1 if device == "cpu" else int(device.split(":")[-1])
@@ -137,7 +137,7 @@ class TextAugmentDeviceModel:
       device = self.device
     if device_id is not None:
       self.device_id = int(device_id)
-      self.device = "cpu" if device_id < 0 else "cuda:"+str(device_id)
+      self.device = "cpu" if device_id < 0 else f"cuda:{str(device_id)}"
     elif device is not None:
       self.device=device
       self.device_id = -1 if device == "cpu" else int(device.split(":")[-1])
@@ -155,7 +155,12 @@ class TextAugmentDeviceModel:
       self.translation_pipelines  = {}
       self.translation_pipelines["facebook/m2m100_418M"] =  M2M100ForConditionalGeneration.from_pretrained("facebook/m2m100_418M").eval().half().to(self.device)
     seen = {}
-    pairs = list(set([(src_lang, target_lang) for src_lang, target_lang in zip(src_langs, target_langs+aug_langs)] + [(target_lang, src_lang) for src_lang,target_lang in zip(src_langs, target_langs+aug_langs)]))
+    pairs = list(
+        set(
+            list(zip(src_langs, target_langs + aug_langs)) +
+            [(target_lang, src_lang)
+             for src_lang, target_lang in zip(src_langs, target_langs +
+                                              aug_langs)]))
     for pair in pairs:
       if pair not in seen:
         model_name = marian_mt.get(pair)
@@ -240,17 +245,14 @@ class TextAugment:
         TextAugment.cache_dir = cache_dir
     if device is not None:
       TextAugment.device = device
-      if device == "cpu":
-        TextAugment.device_id = -1
-      else:
-        TextAugment.device_id = int(device.split(":")[-1])
+      TextAugment.device_id = -1 if device == "cpu" else int(device.split(":")[-1])
+    elif TextAugmentDeviceModel.available_devices:
+      TextAugment.device_id = -1 if TextAugmentDeviceModel.available_devices[0] == -1 else random.choice(TextAugmentDeviceModel.available_devices)
+      TextAugment.device = ("cpu" if TextAugment.device_id == -1 else
+                            f"cuda:{str(TextAugment.device_id)}")
     else:
-      if TextAugmentDeviceModel.available_devices:
-        TextAugment.device_id = -1 if TextAugmentDeviceModel.available_devices[0] == -1 else random.choice(TextAugmentDeviceModel.available_devices)
-        TextAugment.device = "cpu" if TextAugment.device_id == -1 else "cuda:"+str(TextAugment.device_id)
-      else:
-        TextAugment.device_id = -1
-        TextAugment.device = "cpu"
+      TextAugment.device_id = -1
+      TextAugment.device = "cpu"
     logger.info (('running on ', TextAugment.device))
     if single_process:
       self.initializer(available_device_model=available_device_model, device=TextAugment.device, labse=labse,  translation_pipelines=translation_pipelines, ner_model_name2pipelines=ner_model_name2pipelines, en_spacy_nlp=en_spacy_nlp, faker_en_list=faker_en_list, qg=qg, cache_dir=cache_dir)
@@ -266,27 +268,20 @@ class TextAugment:
         TextAugment.cache_dir = cache_dir
     if device is not None:
       TextAugment.device = device
-      if device == "cpu":
-        TextAugment.device_id = -1
-      else:
-        TextAugment.device_id = int(device.split(":")[-1])
+      TextAugment.device_id = -1 if device == "cpu" else int(device.split(":")[-1])
+    elif TextAugmentDeviceModel.available_devices:
+      TextAugment.device_id = -1 if TextAugmentDeviceModel.available_devices[0] == -1 else random.choice(TextAugmentDeviceModel.available_devices)
+      TextAugment.device = ("cpu" if TextAugment.device_id == -1 else
+                            f"cuda:{str(TextAugment.device_id)}")
     else:
-      if TextAugmentDeviceModel.available_devices:
-        TextAugment.device_id = -1 if TextAugmentDeviceModel.available_devices[0] == -1 else random.choice(TextAugmentDeviceModel.available_devices)
-        TextAugment.device = "cpu" if TextAugment.device_id == -1 else "cuda:"+str(TextAugment.device_id)
-      else:
-        TextAugment.device_id = -1
-        TextAugment.device = "cpu"
+      TextAugment.device_id = -1
+      TextAugment.device = "cpu"
 
     device = TextAugment.device
     if available_device_model is not None:
       TextAugmentDeviceModel.available_device_models  [max(0,available_device_model.device_id)] = available_device_model
       device_id = available_device_model.device_id
       TextAugment.device = device = available_device_model.device
-      labse = available_device_model.labse
-      qg = available_device_model.qg
-      translation_pipelines = available_device_model.translation_pipelines
-      ner_model_name2pipelines = available_device_model.ner_model_name2pipelines
     else:
       if device is None:
         if TextAugmentDeviceModel.available_devices and TextAugmentDeviceModel.available_devices[0].device_id >= 0:
@@ -300,22 +295,20 @@ class TextAugment:
           else:
             device_id = random.choice(TextAugmentDeviceModel.available_devices)
           TextAugment.device_id = device_id
-          device = TextAugment.device = "cuda:"+str(TextAugment.device_id)
+          device = TextAugment.device = f"cuda:{str(TextAugment.device_id)}"
         else:
           device_id = TextAugment.device_id = -1
           device = TextAugment.device = "cpu"
       else:
         device_id = -1 if device == "cpu" else int(device.split(":")[-1])
-      if True:
-        #print (device_id)
-        available_device_model = TextAugmentDeviceModel.available_device_models[max(0,device_id)]
-        if available_device_model is None:
-          TextAugmentDeviceModel.available_device_models[max(0,device_id)] = available_device_model = TextAugmentDeviceModel(device=TextAugment.device)
-        labse = available_device_model.labse
-        qg = available_device_model.qg
-        translation_pipelines = available_device_model.translation_pipelines
-        ner_model_name2pipelines = available_device_model.ner_model_name2pipelines
-
+      #print (device_id)
+      available_device_model = TextAugmentDeviceModel.available_device_models[max(0,device_id)]
+      if available_device_model is None:
+        TextAugmentDeviceModel.available_device_models[max(0,device_id)] = available_device_model = TextAugmentDeviceModel(device=TextAugment.device)
+    ner_model_name2pipelines = available_device_model.ner_model_name2pipelines
+    translation_pipelines = available_device_model.translation_pipelines
+    qg = available_device_model.qg
+    labse = available_device_model.labse
     if labse is not None: TextAugment.labse = labse
     if translation_pipelines is not None: TextAugment.translation_pipelines = translation_pipelines
     if ner_model_name2pipelines is not None: TextAugment.ner_model_name2pipelines = ner_model_name2pipelines
@@ -324,13 +317,11 @@ class TextAugment:
     if faker_en_list is not None: TextAugment.faker_en_list = faker_en_list
     if TextAugment.en_spacy_nlp is None: TextAugment.en_spacy_nlp = spacy.load('en_core_web_sm')
     try:
-        coref = neuralcoref.NeuralCoref(TextAugment.en_spacy_nlp.vocab)
-        TextAugment.en_spacy_nlp.add_pipe(coref, name='neuralcoref')
-        #we could potentially add new items to the vocabulary to improve coref.
+      coref = neuralcoref.NeuralCoref(TextAugment.en_spacy_nlp.vocab)
+      TextAugment.en_spacy_nlp.add_pipe(coref, name='neuralcoref')
+      #we could potentially add new items to the vocabulary to improve coref.
     except:
-        logger.info("Neuralcoref not loaded. Using normal spacy")
-        pass
-
+      logger.info("Neuralcoref not loaded. Using normal spacy")
     if TextAugment.faker_en_list is None:
       TextAugment.faker_en_list  = faker_en_list = [Faker(faker_lang) for faker_lang in faker_map["en"]]
       for i, faker_en in enumerate(faker_en_list):
@@ -349,32 +340,29 @@ class TextAugment:
   def serialize_ner_items(docs, ner_keys=None, outfile=""):
         #print ("serialize_ner_items")
         # serialize ner keys
-        if ner_keys:
-          ner_keys = [k + '_ner' for k in ner_keys if '_ner' not in k]
-        else:
-          ner_keys = []
-        if type(docs) is dict:
-          serialize_docs = list(docs.values())
-        else:
-          serialize_docs = docs
-        serialize_docs = copy.deepcopy(serialize_docs)
-        serialize_docs.sort(key=lambda a: int(a.get('id', -1)))
+    if ner_keys:
+      ner_keys = [f'{k}_ner' for k in ner_keys if '_ner' not in k]
+    else:
+      ner_keys = []
+    serialize_docs = list(docs.values()) if type(docs) is dict else docs
+    serialize_docs = copy.deepcopy(serialize_docs)
+    serialize_docs.sort(key=lambda a: int(a.get('id', -1)))
+    for doc in serialize_docs:
+      for ner_key in ner_keys + ([] if ner_keys else [key for key in doc if '_ner' in key]):
+        ner_items = doc[ner_key]
+        if type(ner_items) is dict:
+          serialize_items = []
+          for (text, start, end), ner_value in ner_items.items():
+              ner_value = list(ner_value.items())
+              ner_dict = [text, start, end, ner_value]
+              serialize_items.append(ner_dict)
+          doc[ner_key] = serialize_items
+    if outfile:
+      with open(outfile, 'w', encoding='utf-8') as file:
         for doc in serialize_docs:
-            for ner_key in ner_keys + ([] if ner_keys else [key for key in doc if '_ner' in key]):
-                ner_items = doc[ner_key]
-                serialize_items = []
-                if type(ner_items) is dict:
-                  for (text, start, end), ner_value in ner_items.items():
-                      ner_value = list(ner_value.items())
-                      ner_dict = [text, start, end, ner_value]
-                      serialize_items.append(ner_dict)
-                  doc[ner_key] = serialize_items
-        if outfile:
-          with open(outfile, 'w', encoding='utf-8') as file:
-            for doc in serialize_docs:
-              doc = json.dumps(doc)
-              file.write(f'{doc}\n')
-        return serialize_docs
+          doc = json.dumps(doc)
+          file.write(f'{doc}\n')
+    return serialize_docs
 
   @staticmethod
   def deserialize_ner_items(docs=None, infile="", return_dict=False):
@@ -388,7 +376,7 @@ class TextAugment:
       if dat is not None: return dat
       ret = {'__ret': None}
       #print (s)
-      exec("__ret= "+s, ret)
+      exec(f"__ret= {s}", ret)
       return ret['__ret']
 
     def deserialize_doc(doc):
@@ -413,11 +401,9 @@ class TextAugment:
         return_dict = True
       else:
         docs = copy.copy(docs)
-    if return_dict:
-      return dict([(int(doc.get('id', idx)), deserialize_doc(doc)) for idx, doc in enumerate(docs)])
-    else:
-      return [deserialize_doc(doc) for doc in docs]
-    return docs
+    return (dict([(int(doc.get('id', idx)), deserialize_doc(doc))
+                  for idx, doc in enumerate(docs)])
+            if return_dict else [deserialize_doc(doc) for doc in docs])
 
   @staticmethod
   def get_lang_groups(src_lang):
@@ -555,13 +541,13 @@ class TextAugment:
       rel_key = f'{src_lang}_rel'
     i= 0
     allqa = []
+    answers1={}
     for chunk in chunks:
       text = chunk[text_key]
       _id = chunk['id']
       ner = docs[_id][ner_key] = docs[_id].get(ner_key,{})
       rel = docs[_id][rel_key] = docs[_id].get(rel_key,{})
       default_answers = list(set([a[0] for a in ner.keys()]+default_answers))
-      answers1={}
       #ti = time.time()
       text = text.replace("\n", " ").replace(",", " , ").replace("  ", " ").strip().replace(" , ", ", ")
       aHash = self.qg(text , default_answers=default_answers)[0]

@@ -109,28 +109,27 @@ def load_kenlm_model(
     for model_type in pretrained_models:
         if model_type not in kenlm_models.keys():
             warnings.warn(f"{model_type} pretrained model is not supported!")
+        elif src_lang in kenlm_models[model_type]:
+            all_models[model_type] = kenlm_models[model_type][src_lang]
         else:
-            if src_lang in kenlm_models[model_type]:
-                all_models[model_type] = kenlm_models[model_type][src_lang]
-            else:
-                os.system(f"mkdir -p {cache_dir}/{model_type}")
-                found = True
-                for model_file in model_files:
-                    if not os.path.exists(f"{cache_dir}/{model_type}/{src_lang}.{model_file}"):
-                        try:
-                            file_url = hf_hub_url(repo_id="edugp/kenlm",
-                                                  filename=f"{model_type}/{src_lang}.{model_file}")
-                            file = cached_download(file_url)
-                            os.system(f"ln -s {file} {cache_dir}/{model_type}/{src_lang}.{model_file}")
-                        except:
-                            warnings.warn(f'could not find model {src_lang}.{model_file}. will stop searching...')
-                            found = False
-                            break
-                if found:
-                    model = KenlmModel(f"{cache_dir}/{model_type}", src_lang)
-                    all_models[model_type] = model
-                    if store_model:
-                        kenlm_models[model_type][src_lang] = model
+            os.system(f"mkdir -p {cache_dir}/{model_type}")
+            found = True
+            for model_file in model_files:
+                if not os.path.exists(f"{cache_dir}/{model_type}/{src_lang}.{model_file}"):
+                    try:
+                        file_url = hf_hub_url(repo_id="edugp/kenlm",
+                                              filename=f"{model_type}/{src_lang}.{model_file}")
+                        file = cached_download(file_url)
+                        os.system(f"ln -s {file} {cache_dir}/{model_type}/{src_lang}.{model_file}")
+                    except:
+                        warnings.warn(f'could not find model {src_lang}.{model_file}. will stop searching...')
+                        found = False
+                        break
+            if found:
+                model = KenlmModel(f"{cache_dir}/{model_type}", src_lang)
+                all_models[model_type] = model
+                if store_model:
+                    kenlm_models[model_type][src_lang] = model
     return all_models
 
 
@@ -157,12 +156,8 @@ def check_for_common_name(
             if score < pattern['cutoff']:
                 if verbose:
                     print(name, score)
-                if return_score:
-                    return True, score, pattern['cutoff']
-                return True
-    if return_score:
-        return False, 0.0, 0.0
-    return False
+                return (True, score, pattern['cutoff']) if return_score else True
+    return (False, 0.0, 0.0) if return_score else False
 
 
 ### Edugp code
@@ -174,7 +169,7 @@ class SentencePiece:
     ):
         super().__init__()
         self.sp = sentencepiece.SentencePieceProcessor()
-        self.sp.load(str(model))
+        self.sp.load(model)
 
     def do(self, text: dict) -> dict:
         tokenized = self.sp.encode_as_pieces(text)
@@ -310,9 +305,7 @@ class KenlmModel:
         """Strips accents from a piece of text."""
         nfd = unicodedata.normalize("NFD", line)
         output = [c for c in nfd if unicodedata.category(c) != "Mn"]
-        if len(output) == line:
-            return line
-        return "".join(output)
+        return line if len(output) == line else "".join(output)
 
     def replace_unicode_punct(self, text: str) -> str:
         return "".join(self.unicode_punct.get(c, c) for c in text)
@@ -338,9 +331,5 @@ class KenlmModel:
             test_name = pattern['pattern'].format(name)
             score = self.get_perplexity(test_name)
             if score < pattern['cutoff']:
-                if return_score:
-                    return True, score, pattern['cutoff']
-                return True
-        if return_score:
-            return False, 0.0, 0.0
-        return False
+                return (True, score, pattern['cutoff']) if return_score else True
+        return (False, 0.0, 0.0) if return_score else False
